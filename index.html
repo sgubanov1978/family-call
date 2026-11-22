@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0078d4" />
+  <title>Семейный Скайп</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.3.5/mqtt.min.js"></script>
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { margin: 0; background: #f0f4f8; color: #1a202c; display: flex; flex-direction: column; height: 100dvh; }
+    .hidden { display: none !important; }
+    #loginScreen { margin: auto; background: #fff; padding: 28px; border-radius: 18px; width: 92%; max-width: 380px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); text-align: center; }
+    #loginScreen h2 { margin-top: 0; color: #0078d4; }
+    select, input, button { width: 100%; padding: 14px; margin-top: 12px; border-radius: 12px; font-size: 16px; border: 1px solid #cbd5e0; }
+    button { background: #0078d4; color: #fff; border: none; font-weight: 600; cursor: pointer; }
+    button:active { opacity: 0.85; }
+    header { background: #0078d4; color: #fff; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 16px; }
+    .logout-btn { width: auto; margin: 0; padding: 6px 12px; font-size: 13px; background: rgba(255,255,255,0.2); }
+    .contacts { display: flex; gap: 8px; overflow-x: auto; padding: 12px; background: #fff; border-bottom: 1px solid #e2e8f0; }
+    .contact-card { flex: 0 0 auto; min-width: 115px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 14px; padding: 10px; text-align: center; }
+    .contact-name { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
+    .status { font-size: 12px; margin-bottom: 8px; color: #718096; }
+    .status.online { color: #16a34a; font-weight: 600; }
+    .call-btn { padding: 8px 10px; margin: 0; font-size: 14px; border-radius: 10px; background: #16a34a; }
+    .call-btn:disabled { background: #cbd5e0; cursor: not-allowed; }
+    #chatBox { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+    .msg { max-width: 80%; padding: 10px 14px; border-radius: 16px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.06); align-self: flex-start; }
+    .msg.mine { background: #dcf8c6; align-self: flex-end; }
+    .msg-meta { font-size: 11px; color: #64748b; margin-bottom: 3px; font-weight: 600; }
+    .msg-text { font-size: 16px; word-wrap: break-word; }
+    .chat-input-bar { display: flex; gap: 8px; padding: 10px; background: #fff; border-top: 1px solid #e2e8f0; }
+    .chat-input-bar input { margin: 0; flex: 1; }
+    .chat-input-bar button { margin: 0; width: auto; padding: 0 20px; }
+    #incomingModal { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.92); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; text-align: center; padding: 20px; }
+    .ring-avatar { width: 96px; height: 96px; border-radius: 50%; background: #0078d4; display: flex; align-items: center; justify-content: center; font-size: 38px; margin-bottom: 16px; animation: pulse 1.2s infinite; }
+    @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }
+    .ring-actions { display: flex; gap: 20px; margin-top: 30px; width: 100%; max-width: 320px; }
+    .btn-accept { background: #16a34a; font-size: 18px; padding: 16px; }
+    .btn-reject { background: #dc2626; font-size: 18px; padding: 16px; }
+    #videoScreen { position: fixed; inset: 0; background: #000; z-index: 90; display: flex; flex-direction: column; }
+    #remoteVideo { width: 100%; height: 100%; object-fit: cover; }
+    #localVideo { position: absolute; top: 16px; right: 16px; width: 110px; height: 155px; object-fit: cover; border-radius: 12px; border: 2px solid #fff; background: #222; }
+    #callStatusText { position: absolute; top: 20px; left: 16px; color: #fff; background: rgba(0,0,0,0.55); padding: 6px 12px; border-radius: 10px; font-size: 14px; }
+    .video-controls { position: absolute; bottom: 28px; left: 0; right: 0; display: flex; justify-content: center; gap: 18px; }
+    .ctrl-btn { width: 60px; height: 60px; border-radius: 50%; margin: 0; font-size: 22px; display: flex; align-items: center; justify-content: center; }
+    .end-call { background: #dc2626; width: 68px; height: 68px; }
+  </style>
+</head>
+<body>
+
+  <div id="loginScreen">
+    <h2>Семейный Скайп</h2>
+    <p style="color:#64748b;font-size:14px;">Выберите своё имя и введите семейный код</p>
+    <select id="userSelect">
+      <option value="0">Сережа</option>
+      <option value="1">Мама</option>
+      <option value="2">Алеша</option>
+      <option value="3">Наташа</option>
+      <option value="4">Оля</option>
+    </select>
+    <input type="password" id="pinInput" placeholder="Семейный код" />
+    <button onclick="login()">Войти</button>
+    <p id="loginErr" style="color:#dc2626;font-size:14px;"></p>
+  </div>
+
+  <div id="appScreen" class="hidden" style="display:flex;flex-direction:column;height:100dvh;">
+    <header>
+      <span id="headerTitle">Семья</span>
+      <button class="logout-btn" onclick="logout()">Выйти</button>
+    </header>
+    <div class="contacts" id="contactsBar"></div>
+    <div id="chatBox"></div>
+    <div class="chat-input-bar">
+      <input type="text" id="msgInput" placeholder="Написать сообщение..." onkeydown="if(event.key==='Enter') sendChat()" />
+      <button onclick="sendChat()">➤</button>
+    </div>
+  </div>
+
+  <div id="incomingModal" class="hidden">
+    <div class="ring-avatar">📞</div>
+    <h2 id="callerNameText">Входящий звонок...</h2>
+    <p>Видеозвонок</p>
+    <div class="ring-actions">
+      <button class="btn-accept" onclick="acceptCall()">Ответить</button>
+      <button class="btn-reject" onclick="rejectCall()">Отклонить</button>
+    </div>
+  </div>
+
+  <div id="videoScreen" class="hidden">
+    <video id="remoteVideo" autoplay playsinline></video>
+    <video id="localVideo" autoplay playsinline muted></video>
+    <div id="callStatusText">Соединение...</div>
+    <div class="video-controls">
+      <button class="ctrl-btn" style="background:#334155;" onclick="toggleMic()" id="micBtn">🎤</button>
+      <button class="ctrl-btn" style="background:#334155;" onclick="toggleCam()" id="camBtn">📷</button>
+      <button class="ctrl-btn end-call" onclick="endCall(true)">📵</button>
+    </div>
+  </div>
+
+<script>
+  var FAMILY_PIN = '12345';
+  var TOPIC_BASE = 'fam_donetsk_sgubanov_98234_x7';
+  var MEMBERS = ['Сережа', 'Мама', 'Алеша', 'Наташа', 'Оля'];
+
+  var client = null, myIndex = null, myName = '';
+  var onlineLastSeen = {};
+  var peerConn = null, localStream = null, currentPeerIdx = null, incomingFromIdx = null;
+  var ringInterval = null;
+
+  var gHost = ['stun', 'l', 'google', 'com'].join('.');
+  var tHost = ['free', 'expressturn', 'com'].join('.');
+  var rtcConfig = {
+    iceServers: [
+      { urls: 'stun:' + gHost + ':19302' },
+      {
+        urls: [
+          'turn:' + tHost + ':3478?transport=udp',
+          'turn:' + tHost + ':3478?transport=tcp',
+          'turns:' + tHost + ':443?transport=tcp'
+        ],
+        username: '000000002110734219',
+        credential: 'DBbyA8/bZv92wCvN+F2RwcNFeog='
+      }
+    ]
+  };
+
+  function saveStore(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function readStore(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function clearStore() { try { localStorage.clear(); } catch (e) {} }
+
+  function playRingtone() {
+    stopRingtone();
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var beep = function() {
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        osc.frequency.setValueAtTime(554, ctx.currentTime + 0.25);
+        gain.gain.setValueAtTime(0.25, ctx.currentTime);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.6);
+      };
+      beep();
+      ringInterval = setInterval(beep, 2000);
+    } catch (e) {}
+  }
+  function stopRingtone() {
+    if (ringInterval) { clearInterval(ringInterval); ringInterval = null; }
+  }
+
+  function login() {
+    var pin = document.getElementById('pinInput').value.trim();
+    if (pin !== FAMILY_PIN) {
+      document.getElementById('loginErr').innerText = 'Неверный семейный код';
+      return;
+    }
+    myIndex = document.getElementById('userSelect').value;
+    myName = MEMBERS.at(Number(myIndex));
+    saveStore('fam_idx', myIndex);
+    saveStore('fam_pin', pin);
+    startApp();
+  }
+
+  function logout() {
+    clearStore();
+    location.reload();
+  }
+
+  function sendSignal(toIdx, payloadObj) {
+    if (!client || !client.connected) return;
+    payloadObj.from = myIndex;
+    client.publish(TOPIC_BASE + '/user/' + toIdx, JSON.stringify(payloadObj));
+  }
+
+  function startApp() {
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    document.getElementById('headerTitle').innerText = 'Вы: ' + myName + ' (подключение...)';
+    loadLocalHistory();
+    renderContacts();
+
+    var brokerHost = ['broker', 'emqx', 'io'].join('.');
+    var brokerUrl = 'wss://' + brokerHost + ':8084/mqtt';
+    client = mqtt.connect(brokerUrl, {
+      clientId: 'fam_' + myIndex + '_' + Math.random().toString(16).slice(2, 8),
+      clean: true,
+      reconnectPeriod: 3000
+    });
+
+    client.on('connect', function() {
+      document.getElementById('headerTitle').innerText = 'Вы: ' + myName + ' ●';
+      client.subscribe(TOPIC_BASE + '/presence');
+      client.subscribe(TOPIC_BASE + '/chat');
+      client.subscribe(TOPIC_BASE + '/user/' + myIndex);
+      publishPresence();
+    });
+
+client.on('reconnect', function() {
+document.getElementById('headerTitle').innerText = 'Вы: ' + myName + ' (поиск сети...)';
+});
+client.on('message', async function(topic, message) {
+var data;
+try { data = JSON.parse(message.toString()); } catch (e) { return; }
+if (topic === TOPIC_BASE + '/presence') {
+if (String(data.idx) !== String(myIndex)) {
+onlineLastSeen[String(data.idx)] = Date.now();
+renderContacts();
+}
+return;
+}
+if (topic === TOPIC_BASE + '/chat') {
+if (data.from !== myName) appendMsg(data, true);
+return;
+}
+if (topic === TOPIC_BASE + '/user/' + myIndex) {
+var fromIdx = String(data.from);
+onlineLastSeen[fromIdx] = Date.now();
+if (data.type === 'call_request') {
+if (currentPeerIdx || incomingFromIdx) return;
+incomingFromIdx = fromIdx;
+document.getElementById('callerNameText').innerText = 'Звонит: ' + (MEMBERS.at(Number(fromIdx)) || 'Семья');
+document.getElementById('incomingModal').classList.remove('hidden');
+playRingtone();
+} else if (data.type === 'call_accept') {
+stopRingtone();
+document.getElementById('callStatusText').innerText = 'В разговоре: ' + MEMBERS.at(Number(fromIdx));
+await startWebRTC(true);
+} else if (data.type === 'call_reject') {
+stopRingtone();
+alert(MEMBERS.at(Number(fromIdx)) + ' отклонил(а) звонок');
+endCall(false);
+} else if (data.type === 'call_end') {
+endCall(false);
+} else if (data.type === 'webrtc_offer' && peerConn) {
+await peerConn.setRemoteDescription(new RTCSessionDescription(data.offer));
+var answer = await peerConn.createAnswer();
+await peerConn.setLocalDescription(answer);
+sendSignal(fromIdx, { type: 'webrtc_answer', answer: answer });
+} else if (data.type === 'webrtc_answer' && peerConn) {
+await peerConn.setRemoteDescription(new RTCSessionDescription(data.answer));
+} else if (data.type === 'webrtc_ice' && peerConn && data.candidate) {
+try { await peerConn.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (err) {}
+}
+}
+});
+setInterval(publishPresence, 4000);
+setInterval(renderContacts, 4000);
+}
+function publishPresence() {
+if (client && client.connected) {
+client.publish(TOPIC_BASE + '/presence', JSON.stringify({ idx: myIndex }));
+}
+}
+function renderContacts() {
+var bar = document.getElementById('contactsBar');
+bar.innerHTML = '';
+var now = Date.now();
+MEMBERS.forEach(function(name, idx) {
+var i = String(idx);
+if (i === String(myIndex)) return;
+var isOnline = onlineLastSeen[i] && (now - onlineLastSeen[i] < 12000);
+      var card = document.createElement('div');
+      card.className = 'contact-card';
+      var dName = document.createElement('div');
+      dName.className = 'contact-name';
+      dName.textContent = name;
+      var dStat = document.createElement('div');
+      dStat.className = 'status' + (isOnline ? ' online' : '');
+      dStat.textContent = isOnline ? '● В сети' : '○ Не в сети';
+      var btn = document.createElement('button');
+      btn.className = 'call-btn';
+      btn.disabled = !isOnline;
+      btn.textContent = '📹 Позвонить';
+      btn.onclick = (function(idxStr) { return function() { startCall(idxStr); }; })(i);
+      card.appendChild(dName);
+      card.appendChild(dStat);
+      card.appendChild(btn);
+      bar.appendChild(card);
+    });
+  }
+
+function loadLocalHistory() {
+var saved = JSON.parse(readStore('fam_chat') || '[]');
+saved.forEach(function(m) { appendMsg(m, false); });
+}
+  function appendMsg(msg, save) {
+    var box = document.getElementById('chatBox');
+    var div = document.createElement('div');
+    div.className = 'msg' + (msg.from === myName ? ' mine' : '');
+    var meta = document.createElement('div');
+    meta.className = 'msg-meta';
+    meta.textContent = msg.from + ' · ' + msg.time;
+    var txt = document.createElement('div');
+    txt.className = 'msg-text';
+    txt.textContent = msg.text;
+    div.appendChild(meta);
+    div.appendChild(txt);
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+    if (save) {
+      var saved = JSON.parse(readStore('fam_chat') || '[]');
+      saved.push(msg);
+      saveStore('fam_chat', JSON.stringify(saved.slice(-150)));
+    }
+  }
+function sendChat() {
+var input = document.getElementById('msgInput');
+var text = input.value.trim();
+if (!text) return;
+var msg = {
+from: myName,
+text: text,
+time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+};
+appendMsg(msg, true);
+if (client && client.connected) {
+client.publish(TOPIC_BASE + '/chat', JSON.stringify(msg));
+}
+input.value = '';
+}
+async function startCall(targetIdx) {
+try {
+localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+} catch (e) {
+alert('Разрешите доступ к камере и микрофону!');
+return;
+}
+currentPeerIdx = targetIdx;
+document.getElementById('localVideo').srcObject = localStream;
+document.getElementById('videoScreen').classList.remove('hidden');
+document.getElementById('callStatusText').innerText = 'Вызов: ' + MEMBERS.at(Number(targetIdx)) + '...';
+playRingtone();
+sendSignal(targetIdx, { type: 'call_request' });
+}
+async function acceptCall() {
+stopRingtone();
+currentPeerIdx = incomingFromIdx;
+incomingFromIdx = null;
+document.getElementById('incomingModal').classList.add('hidden');
+try {
+localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+} catch (e) {
+alert('Разрешите доступ к камере и микрофону!');
+rejectCall();
+return;
+}
+document.getElementById('localVideo').srcObject = localStream;
+document.getElementById('videoScreen').classList.remove('hidden');
+document.getElementById('callStatusText').innerText = 'В разговоре: ' + MEMBERS.at(Number(currentPeerIdx));
+await startWebRTC(false);
+sendSignal(currentPeerIdx, { type: 'call_accept' });
+}
+function rejectCall() {
+stopRingtone();
+document.getElementById('incomingModal').classList.add('hidden');
+if (incomingFromIdx) sendSignal(incomingFromIdx, { type: 'call_reject' });
+incomingFromIdx = null;
+}
+async function startWebRTC(isCaller) {
+peerConn = new RTCPeerConnection(rtcConfig);
+localStream.getTracks().forEach(function(track) { peerConn.addTrack(track, localStream); });
+peerConn.ontrack = function(event) {
+document.getElementById('remoteVideo').srcObject = event.streams.at(0);
+};
+peerConn.onicecandidate = function(event) {
+if (event.candidate && currentPeerIdx) {
+sendSignal(currentPeerIdx, { type: 'webrtc_ice', candidate: event.candidate });
+}
+};
+if (isCaller) {
+var offer = await peerConn.createOffer();
+await peerConn.setLocalDescription(offer);
+sendSignal(currentPeerIdx, { type: 'webrtc_offer', offer: offer });
+}
+}
+function endCall(notify) {
+stopRingtone();
+if (notify && currentPeerIdx) sendSignal(currentPeerIdx, { type: 'call_end' });
+if (peerConn) { peerConn.close(); peerConn = null; }
+if (localStream) { localStream.getTracks().forEach(function(t) { t.stop(); }); localStream = null; }
+document.getElementById('videoScreen').classList.add('hidden');
+document.getElementById('incomingModal').classList.add('hidden');
+currentPeerIdx = null;
+}
+function toggleMic() {
+if (!localStream) return;
+var t = localStream.getAudioTracks().at(0);
+if (t) {
+t.enabled = !t.enabled;
+document.getElementById('micBtn').style.opacity = t.enabled ? '1' : '0.4';
+}
+}
+function toggleCam() {
+if (!localStream) return;
+var t = localStream.getVideoTracks().at(0);
+if (t) {
+t.enabled = !t.enabled;
+document.getElementById('camBtn').style.opacity = t.enabled ? '1' : '0.4';
+}
+}
+window.onload = function() {
+var savedIdx = readStore('fam_idx');
+var savedPin = readStore('fam_pin');
+if (savedIdx !== null && savedPin === FAMILY_PIN) {
+myIndex = savedIdx;
+myName = MEMBERS.at(Number(myIndex));
+startApp();
+}
+};
+</script>
+</body>
+</html>
