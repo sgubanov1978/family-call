@@ -111,20 +111,32 @@
 
   var gHost = ['stun', 'l', 'google', 'com'].join('.');
   var tHost = ['free', 'expressturn', 'com'].join('.');
+    var mHost = ['standard', 'relay', 'metered', 'ca'].join('.');
   var rtcConfig = {
-iceTransportPolicy: 'relay',
-iceServers: [
-{
-urls: [
-'turn:' + tHost + ':3478?transport=udp',
-'turn:' + tHost + ':3478?transport=tcp',
-'turns:' + tHost + ':443?transport=tcp'
-],
-username: '000000002110734219',
-credential: 'DBbyA8/bZv92wCvN+F2RwcNFeog='
-}
-]
-};
+    iceTransportPolicy: 'all',
+    iceServers: [
+      { urls: 'stun:' + gHost + ':19302' },
+      {
+        urls: [
+          'turn:' + tHost + ':3478?transport=udp',
+          'turn:' + tHost + ':3478?transport=tcp',
+          'turns:' + tHost + ':443?transport=tcp'
+        ],
+        username: '000000002110734219',
+        credential: 'DBbyA8/bZv92wCvN+F2RwcNFeog='
+      },
+      {
+        urls: [
+          'turn:' + mHost + ':80',
+          'turn:' + mHost + ':80?transport=tcp',
+          'turn:' + mHost + ':443',
+          'turns:' + mHost + ':443?transport=tcp'
+        ],
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      }
+    ]
+  };
   function saveStore(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
   function readStore(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function clearStore() { try { localStorage.clear(); } catch (e) {} }
@@ -404,6 +416,9 @@ incomingFromIdx = null;
   async function startWebRTC(isCaller) {
     if (peerConn) return;
     peerConn = new RTCPeerConnection(rtcConfig);
+     peerConn.oniceconnectionstatechange = function() {
+   document.getElementById('callStatusText').innerText = 'Сеть: ' + peerConn.iceConnectionState;
+ };
     localStream.getTracks().forEach(function(track) { peerConn.addTrack(track, localStream); });
     peerConn.ontrack = function(event) {
       var remVid = document.getElementById('remoteVideo');
