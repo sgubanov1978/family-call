@@ -176,6 +176,12 @@
     payloadObj.from = myIndex;
     client.publish(TOPIC_BASE + '/user/' + toIdx, JSON.stringify(payloadObj));
   }
+     var brokers = [
+    'wss://' + ['broker', 'hivemq', 'com'].join('.') + ':8884/mqtt',
+    'wss://' + ['broker', 'emqx', 'io'].join('.') + ':8084/mqtt',
+    'wss://' + ['test', 'mosquitto', 'org'].join('.') + ':8081/mqtt'
+  ];
+  var brokerIdx = 0;
 
   function startApp() {
     document.getElementById('loginScreen').classList.add('hidden');
@@ -183,13 +189,20 @@
     document.getElementById('headerTitle').innerText = 'Вы: ' + myName + ' (подключение...)';
     loadLocalHistory();
     renderContacts();
+    connectBroker();
+    setInterval(publishPresence, 2500);
+    setInterval(renderContacts, 3000);
+  }
 
-    var brokerHost = ['broker', 'emqx', 'io'].join('.');
-    var brokerUrl = 'wss://' + brokerHost + ':8084/mqtt';
-    client = mqtt.connect(brokerUrl, {
-      clientId: 'fam_' + myIndex + '_' + Math.random().toString(16).slice(2, 8),
+  function connectBroker() {
+    if (client) { try { client.end(true); } catch (e) {} }
+    var url = brokers.at(brokerIdx % brokers.length);
+    client = mqtt.connect(url, {
+      clientId: 'fam_' + myIndex + '_' + Math.random().toString(16).slice(2, 10),
       clean: true,
-      reconnectPeriod: 3000
+      keepalive: 15,
+      reconnectPeriod: 1500,
+      connectTimeout: 5000
     });
 
     client.on('connect', function() {
@@ -200,62 +213,71 @@
       publishPresence();
     });
 
-client.on('reconnect', function() {
-document.getElementById('headerTitle').innerText = 'Вы: ' + myName + ' (поиск сети...)';
-});
-client.on('message', async function(topic, message) {
-var data;
-try { data = JSON.parse(message.toString()); } catch (e) { return; }
-if (topic === TOPIC_BASE + '/presence') {
-if (String(data.idx) !== String(myIndex)) {
-onlineLastSeen[String(data.idx)] = Date.now();
-renderContacts();
-}
-return;
-}
-if (topic === TOPIC_BASE + '/chat') {
-if (data.from !== myName) appendMsg(data, true);
-return;
-}
-if (topic === TOPIC_BASE + '/user/' + myIndex) {
-var fromIdx = String(data.from);
-onlineLastSeen[fromIdx] = Date.now();
-if (data.type === 'call_request') {
-if (currentPeerIdx || incomingFromIdx) return;
-incomingFromIdx = fromIdx;
-document.getElementById('callerNameText').innerText = 'Звонит: ' + (MEMBERS.at(Number(fromIdx)) || 'Семья');
-document.getElementById('incomingModal').classList.remove('hidden');
-playRingtone();
-} else if (data.type === 'call_accept') {
-stopRingtone();
-document.getElementById('callStatusText').innerText = 'В разговоре: ' + MEMBERS.at(Number(fromIdx));
-await startWebRTC(true);
-} else if (data.type === 'call_reject') {
-stopRingtone();
-alert(MEMBERS.at(Number(fromIdx)) + ' отклонил(а) звонок');
-endCall(false);
-} else if (data.type === 'call_end') {
-endCall(false);
-} else if (data.type === 'webrtc_offer' && peerConn) {
-await peerConn.setRemoteDescription(new RTCSessionDescription(data.offer));
-var answer = await peerConn.createAnswer();
-await peerConn.setLocalDescription(answer);
-sendSignal(fromIdx, { type: 'webrtc_answer', answer: answer });
-} else if (data.type === 'webrtc_answer' && peerConn) {
-await peerConn.setRemoteDescription(new RTCSessionDescription(data.answer));
-} else if (data.type === 'webrtc_ice' && peerConn && data.candidate) {
-try { await peerConn.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (err) {}
-}
-}
-});
-setInterval(publishPresence, 4000);
-setInterval(renderContacts, 4000);
-}
-function publishPresence() {
-if (client && client.connected) {
-client.publish(TOPIC_BASE + '/presence', JSON.stringify({ idx: myIndex }));
-}
-}
+    client.on('offline', function() {
+      document.getElementById('headerTitle').innerText = 'Вы: ' + myName + ' (переподключение...)';
+      brokerIdx++;
+    });
+
+    client.on('error', function() {
+      brokerIdx++;
+    });
+
+    client.on('message', async function(topic, message) {
+      var data;
+      try { data = JSON.parse(message.toString()); } catch (e) { return; }
+
+      if (topic === TOPIC_BASE + '/presence') {
+        if (String(data.idx) !== String(myIndex)) {
+          onlineLastSeen[String(data.idx)] = Date.now();
+          renderContacts();
+        }
+        return;
+      }
+
+      if (topic === TOPIC_BASE + '/chat') {
+        if (data.from !== myName) appendMsg(data, true);
+        return;
+      }
+
+      if (topic === TOPIC_BASE + '/user/' + myIndex) {
+        var fromIdx = String(data.from);
+        onlineLastSeen[fromIdx] = Date.now();
+
+        if (data.type === 'call_request') {
+          if (currentPeerIdx || incomingFromIdx) return;
+          incomingFromIdx = fromIdx;
+          document.getElementById('callerNameText').innerText = 'Звонит: ' + (MEMBERS.at(Number(fromIdx)) || 'Семья');
+          document.getElementById('incomingModal').classList.remove('hidden');
+          playRingtone();
+        } else if (data.type === 'call_accept') {
+          stopRingtone();
+          document.getElementById('callStatusText').innerText = 'В разговоре: ' + MEMBERS.at(Number(fromIdx));
+          await startWebRTC(true);
+        } else if (data.type === 'call_reject') {
+          stopRingtone();
+          alert(MEMBERS.at(Number(fromIdx)) + ' отклонил(а) звонок');
+          endCall(false);
+        } else if (data.type === 'call_end') {
+          endCall(false);
+        } else if (data.type === 'webrtc_offer' && peerConn) {
+          await peerConn.setRemoteDescription(new RTCSessionDescription(data.offer));
+          var answer = await peerConn.createAnswer();
+          await peerConn.setLocalDescription(answer);
+          sendSignal(fromIdx, { type: 'webrtc_answer', answer: answer });
+        } else if (data.type === 'webrtc_answer' && peerConn) {
+          await peerConn.setRemoteDescription(new RTCSessionDescription(data.answer));
+        } else if (data.type === 'webrtc_ice' && peerConn && data.candidate) {
+          try { await peerConn.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (err) {}
+        }
+      }
+    });
+  }
+
+  function publishPresence() {
+    if (client && client.connected) {
+      client.publish(TOPIC_BASE + '/presence', JSON.stringify({ idx: myIndex }));
+    }
+  }
 function renderContacts() {
 var bar = document.getElementById('contactsBar');
 bar.innerHTML = '';
