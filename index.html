@@ -176,12 +176,15 @@
     payloadObj.from = myIndex;
     client.publish(TOPIC_BASE + '/user/' + toIdx, JSON.stringify(payloadObj));
   }
-     var brokers = [
-    'wss://' + ['broker', 'hivemq', 'com'].join('.') + ':8884/mqtt',
-    'wss://' + ['broker', 'emqx', 'io'].join('.') + ':8084/mqtt',
-    'wss://' + ['test', 'mosquitto', 'org'].join('.') + ':8081/mqtt'
-  ];
-  var brokerIdx = 0;
+       var brokerUrl = 'wss://' + ['broker', 'hivemq', 'com'].join('.') + ':8884/mqtt';
+
+  function keepScreenAwake() {
+    try {
+      if ('wakeLock' in navigator) {
+        navigator.wakeLock.request('screen');
+      }
+    } catch (e) {}
+  }
 
   function startApp() {
     document.getElementById('loginScreen').classList.add('hidden');
@@ -189,46 +192,46 @@
     document.getElementById('headerTitle').innerText = 'Вы: ' + myName + ' (подключение...)';
     loadLocalHistory();
     renderContacts();
+    keepScreenAwake();
     connectBroker();
-    setInterval(publishPresence, 2500);
-    setInterval(renderContacts, 3000);
+    setInterval(publishPresence, 8000);
+    setInterval(renderContacts, 4000);
+    document.addEventListener('visibilitychange', function() {
+      if (!document.hidden) {
+        keepScreenAwake();
+        publishPresence();
+      }
+    });
   }
 
   function connectBroker() {
-    if (client) { try { client.end(true); } catch (e) {} }
-    var url = brokers.at(brokerIdx % brokers.length);
-    client = mqtt.connect(url, {
+    client = mqtt.connect(brokerUrl, {
       clientId: 'fam_' + myIndex + '_' + Math.random().toString(16).slice(2, 10),
       clean: true,
-      keepalive: 15,
-      reconnectPeriod: 1500,
-      connectTimeout: 5000
+      keepalive: 25,
+      reconnectPeriod: 2000,
+      connectTimeout: 8000
     });
 
     client.on('connect', function() {
       document.getElementById('headerTitle').innerText = 'Вы: ' + myName + ' ●';
-      client.subscribe(TOPIC_BASE + '/presence');
+      client.subscribe(TOPIC_BASE + '/presence/+');
       client.subscribe(TOPIC_BASE + '/chat');
       client.subscribe(TOPIC_BASE + '/user/' + myIndex);
       publishPresence();
     });
 
-    client.on('offline', function() {
-      document.getElementById('headerTitle').innerText = 'Вы: ' + myName + ' (переподключение...)';
-      brokerIdx++;
-    });
-
-    client.on('error', function() {
-      brokerIdx++;
+    client.on('reconnect', function() {
+      document.getElementById('headerTitle').innerText = 'Вы: ' + myName + ' (связь...)';
     });
 
     client.on('message', async function(topic, message) {
       var data;
       try { data = JSON.parse(message.toString()); } catch (e) { return; }
 
-      if (topic === TOPIC_BASE + '/presence') {
-        if (String(data.idx) !== String(myIndex)) {
-          onlineLastSeen[String(data.idx)] = Date.now();
+      if (topic.indexOf(TOPIC_BASE + '/presence/') === 0) {
+        if (String(data.idx) !== String(myIndex) && data.ts) {
+          onlineLastSeen[String(data.idx)] = data.ts;
           renderContacts();
         }
         return;
@@ -275,17 +278,22 @@
 
   function publishPresence() {
     if (client && client.connected) {
-      client.publish(TOPIC_BASE + '/presence', JSON.stringify({ idx: myIndex }));
+      client.publish(
+        TOPIC_BASE + '/presence/' + myIndex,
+        JSON.stringify({ idx: myIndex, ts: Date.now() }),
+        { retain: true }
+      );
     }
   }
-function renderContacts() {
-var bar = document.getElementById('contactsBar');
-bar.innerHTML = '';
-var now = Date.now();
-MEMBERS.forEach(function(name, idx) {
-var i = String(idx);
-if (i === String(myIndex)) return;
-var isOnline = onlineLastSeen[i] && (now - onlineLastSeen[i] < 12000);
+
+  function renderContacts() {
+    var bar = document.getElementById('contactsBar');
+    bar.innerHTML = '';
+    var now = Date.now();
+    MEMBERS.forEach(function(name, idx) {
+      var i = String(idx);
+      if (i === String(myIndex)) return;
+      var isOnline = onlineLastSeen[i] && (now - onlineLastSeen[i] < 45000);
       var card = document.createElement('div');
       card.className = 'contact-card';
       var dName = document.createElement('div');
