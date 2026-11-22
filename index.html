@@ -106,25 +106,25 @@
   var client = null, myIndex = null, myName = '';
   var onlineLastSeen = {};
   var peerConn = null, localStream = null, currentPeerIdx = null, incomingFromIdx = null;
+  var iceQueue = [];
   var ringInterval = null;
 
   var gHost = ['stun', 'l', 'google', 'com'].join('.');
   var tHost = ['free', 'expressturn', 'com'].join('.');
   var rtcConfig = {
-    iceServers: [
-      { urls: 'stun:' + gHost + ':19302' },
-      {
-        urls: [
-          'turn:' + tHost + ':3478?transport=udp',
-          'turn:' + tHost + ':3478?transport=tcp',
-          'turns:' + tHost + ':443?transport=tcp'
-        ],
-        username: '000000002110734219',
-        credential: 'DBbyA8/bZv92wCvN+F2RwcNFeog='
-      }
-    ]
-  };
-
+iceTransportPolicy: 'relay',
+iceServers: [
+{
+urls: [
+'turn:' + tHost + ':3478?transport=udp',
+'turn:' + tHost + ':3478?transport=tcp',
+'turns:' + tHost + ':443?transport=tcp'
+],
+username: '000000002110734219',
+credential: 'DBbyA8/bZv92wCvN+F2RwcNFeog='
+}
+]
+};
   function saveStore(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
   function readStore(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function clearStore() { try { localStorage.clear(); } catch (e) {} }
@@ -260,18 +260,28 @@
           stopRingtone();
           alert(MEMBERS.at(Number(fromIdx)) + ' отклонил(а) звонок');
           endCall(false);
-        } else if (data.type === 'call_end') {
-          endCall(false);
-        } else if (data.type === 'webrtc_offer' && peerConn) {
+               } else if (data.type === 'webrtc_offer') {
+          if (!peerConn) await startWebRTC(false);
           await peerConn.setRemoteDescription(new RTCSessionDescription(data.offer));
+          while (iceQueue.length > 0) {
+            try { await peerConn.addIceCandidate(new RTCIceCandidate(iceQueue.shift())); } catch (err) {}
+          }
           var answer = await peerConn.createAnswer();
           await peerConn.setLocalDescription(answer);
           sendSignal(fromIdx, { type: 'webrtc_answer', answer: answer });
         } else if (data.type === 'webrtc_answer' && peerConn) {
           await peerConn.setRemoteDescription(new RTCSessionDescription(data.answer));
-        } else if (data.type === 'webrtc_ice' && peerConn && data.candidate) {
-          try { await peerConn.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (err) {}
+          while (iceQueue.length > 0) {
+            try { await peerConn.addIceCandidate(new RTCIceCandidate(iceQueue.shift())); } catch (err) {}
+          }
+        } else if (data.type === 'webrtc_ice' && data.candidate) {
+          if (peerConn && peerConn.remoteDescription) {
+            try { await peerConn.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (err) {}
+          } else {
+            iceQueue.push(data.candidate);
+          }
         }
+
       }
     });
   }
@@ -391,27 +401,33 @@ document.getElementById('incomingModal').classList.add('hidden');
 if (incomingFromIdx) sendSignal(incomingFromIdx, { type: 'call_reject' });
 incomingFromIdx = null;
 }
-async function startWebRTC(isCaller) {
-peerConn = new RTCPeerConnection(rtcConfig);
-localStream.getTracks().forEach(function(track) { peerConn.addTrack(track, localStream); });
-peerConn.ontrack = function(event) {
-document.getElementById('remoteVideo').srcObject = event.streams.at(0);
-};
-peerConn.onicecandidate = function(event) {
-if (event.candidate && currentPeerIdx) {
-sendSignal(currentPeerIdx, { type: 'webrtc_ice', candidate: event.candidate });
-}
-};
-if (isCaller) {
-var offer = await peerConn.createOffer();
-await peerConn.setLocalDescription(offer);
-sendSignal(currentPeerIdx, { type: 'webrtc_offer', offer: offer });
-}
-}
-function endCall(notify) {
-stopRingtone();
-if (notify && currentPeerIdx) sendSignal(currentPeerIdx, { type: 'call_end' });
-if (peerConn) { peerConn.close(); peerConn = null; }
+  async function startWebRTC(isCaller) {
+    if (peerConn) return;
+    peerConn = new RTCPeerConnection(rtcConfig);
+    localStream.getTracks().forEach(function(track) { peerConn.addTrack(track, localStream); });
+    peerConn.ontrack = function(event) {
+      var remVid = document.getElementById('remoteVideo');
+      remVid.srcObject = event.streams.at(0);
+      remVid.muted = false;
+      remVid.play().catch(function() {});
+    };
+    peerConn.onicecandidate = function(event) {
+      if (event.candidate && currentPeerIdx) {
+        sendSignal(currentPeerIdx, { type: 'webrtc_ice', candidate: event.candidate });
+      }
+    };
+    if (isCaller) {
+      var offer = await peerConn.createOffer();
+      await peerConn.setLocalDescription(offer);
+      sendSignal(currentPeerIdx, { type: 'webrtc_offer', offer: offer });
+    }
+  }
+
+  function endCall(notify) {
+    stopRingtone();
+    if (notify && currentPeerIdx) sendSignal(currentPeerIdx, { type: 'call_end' });
+    if (peerConn) { peerConn.close(); peerConn = null; }
+    iceQueue = [];
 if (localStream) { localStream.getTracks().forEach(function(t) { t.stop(); }); localStream = null; }
 document.getElementById('videoScreen').classList.add('hidden');
 document.getElementById('incomingModal').classList.add('hidden');
